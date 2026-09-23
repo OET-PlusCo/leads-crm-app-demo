@@ -68,10 +68,28 @@ CONDITIONAL_SKILLS: list[tuple[list[str], callable]] = [
     ),
     # Backend / API — .ts, .js, .py, .go, .java
     (
-        ["api-and-interface-design", "webapp-testing", "writing-unit-tests", "documentation-and-adrs"],
+        ["api-and-interface-design", "webapp-testing", "writing-unit-tests",
+         "documentation-and-adrs", "modern-javascript-patterns"],
         lambda files: any(
             f.endswith((".ts", ".js", ".py", ".go", ".java")) and
             not f.endswith((".tsx", ".jsx"))  # exclude frontend already covered above
+            for f in files
+        ),
+    ),
+    # npm / package management — package.json, package-lock.json, .npmrc
+    (
+        ["npm-security-best-practices"],
+        lambda files: any(
+            os.path.basename(f) in ("package.json", "package-lock.json", ".npmrc", ".nvmrc")
+            for f in files
+        ),
+    ),
+    # NX monorepo — nx.json, project.json, workspace.json, or files inside apps/packages
+    (
+        ["nx-monorepo", "monorepo-management"],
+        lambda files: any(
+            os.path.basename(f) in ("nx.json", "project.json", "workspace.json")
+            or f.startswith(("apps/", "packages/", "libs/", "tools/"))
             for f in files
         ),
     ),
