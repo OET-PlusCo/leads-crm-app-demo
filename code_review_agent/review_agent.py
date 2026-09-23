@@ -57,6 +57,11 @@ SKILLS_PATHS = [
     # Frontend & UI
     os.path.join(SCRIPT_DIR, "skills", "frontend-ui-engineering"),
     os.path.join(SCRIPT_DIR, "skills", "accessibility"),
+    # Testing
+    os.path.join(SCRIPT_DIR, "skills", "writing-unit-tests"),
+    # Infrastructure
+    os.path.join(SCRIPT_DIR, "skills", "terraform-style-guide"),
+    os.path.join(SCRIPT_DIR, "skills", "terraform-test"),
 ]
 
 # Deny-by-default: only allow read + git commands
