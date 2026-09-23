@@ -77,7 +77,7 @@ CONDITIONAL_SKILLS: list[tuple[list[str], callable]] = [
     ),
     # Firebase / Firestore — .rules files or paths containing firebase/firestore
     (
-        ["firebase-security-rules-auditor", "firestore-security-rules-auditor", "firebase-firestore"],
+        ["firebase-security-rules-auditor", "firebase-firestore", "firebase-auth-basics"],
         lambda files: any(
             f.endswith(".rules") or "firebase" in f.lower() or "firestore" in f.lower()
             for f in files
