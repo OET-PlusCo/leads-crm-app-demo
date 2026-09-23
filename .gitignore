@@ -7,3 +7,6 @@ coverage/
 .env*
 !.env.example
 scripts/
+
+# Nested repos that should not be tracked as submodules
+sdd-agy-bigquery-dashboard/
