@@ -295,6 +295,10 @@ file and line number.
         hooks=[log_tool_results, enforce_safe_tools],
     )
 
+    model = os.environ.get("CODE_REVIEW_MODEL", "gemini-3.8-flash")
+    print(f"🤖 Model: {model}", flush=True)
+    config_kwargs["model"] = model
+
     if os.environ.get("GEMINI_API_KEY"):
         config_kwargs["api_key"] = os.environ["GEMINI_API_KEY"]
     else:

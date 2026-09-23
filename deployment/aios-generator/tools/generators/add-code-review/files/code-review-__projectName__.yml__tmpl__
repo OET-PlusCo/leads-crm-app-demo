@@ -24,6 +24,7 @@ jobs:
       - uses: OET-PlusCo/devtools/.github/actions/code-review@main
         with:
           gemini_api_key: ${{ secrets.GEMINI_API_KEY }}
+          code_review_model: ${{ secrets.CODE_REVIEW_MODEL }}
           node_version: '<%= nodeVersion %>'
 <% if (testCommand) { %>          test_command: '<%= testCommand %>'
 <% } %>

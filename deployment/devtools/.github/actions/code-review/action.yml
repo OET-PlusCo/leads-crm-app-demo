@@ -8,6 +8,13 @@ inputs:
   gemini_api_key:
     description: Gemini API key for the review agent
     required: true
+  code_review_model:
+    description: >
+      Gemini model to use for the review (e.g. gemini-3.8-flash).
+      Defaults to gemini-3.8-flash if not set. Update via the
+      CODE_REVIEW_MODEL org secret to change the model across all repos at once.
+    required: false
+    default: ''
   node_version:
     description: Node.js version for type checking
     required: false
@@ -72,6 +79,7 @@ runs:
       shell: bash
       env:
         GEMINI_API_KEY: ${{ inputs.gemini_api_key }}
+        CODE_REVIEW_MODEL: ${{ inputs.code_review_model }}
         TEST_RESULTS_FILE: test_results.txt
         TYPE_CHECK_STATUS: ${{ env.TYPE_CHECK_STATUS }}
       run: |

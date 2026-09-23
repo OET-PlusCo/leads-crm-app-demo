@@ -50,6 +50,7 @@ jobs:
       - name: Run security review
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          CODE_REVIEW_MODEL: ${{ secrets.CODE_REVIEW_MODEL }}
           TEST_RESULTS_FILE: test_results.txt
           TYPE_CHECK_STATUS: ${{ env.TYPE_CHECK_STATUS }}
         run: |
