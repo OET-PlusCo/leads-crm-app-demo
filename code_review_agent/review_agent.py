@@ -62,14 +62,13 @@ def get_changed_files(repo_path: str) -> list[str]:
 
 def review_with_gemini(diff: str, changed_files: list[str]) -> str:
     """Send the diff to Gemini for code review."""
-    import google.generativeai as genai
+    from google import genai
 
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
         return "⚠️ **GEMINI_API_KEY not set** – skipping AI review."
 
-    genai.configure(api_key=api_key)
-    model = genai.GenerativeModel("gemini-1.5-flash")
+    client = genai.Client(api_key=api_key)
 
     if not diff:
         return "ℹ️ No code changes detected in this PR."
@@ -114,7 +113,10 @@ def review_with_gemini(diff: str, changed_files: list[str]) -> str:
         Keep the tone constructive and professional.
     """).strip()
 
-    response = model.generate_content(prompt)
+    response = client.models.generate_content(
+        model="gemini-2.0-flash",
+        contents=prompt,
+    )
     return response.text
 
 
