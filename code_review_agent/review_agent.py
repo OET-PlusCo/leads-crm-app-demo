@@ -46,9 +46,14 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 OUTPUT_FILE = "code_review.md"
 
 SKILLS_PATHS = [
+    # Core review axes
     os.path.join(SCRIPT_DIR, "skills", "code-review-and-quality"),
     os.path.join(SCRIPT_DIR, "skills", "security-and-hardening"),
     os.path.join(SCRIPT_DIR, "skills", "performance-optimization"),
+    # Good practices
+    os.path.join(SCRIPT_DIR, "skills", "api-and-interface-design"),
+    os.path.join(SCRIPT_DIR, "skills", "documentation-and-adrs"),
+    os.path.join(SCRIPT_DIR, "skills", "webapp-testing"),
 ]
 
 # Deny-by-default: only allow read + git commands
