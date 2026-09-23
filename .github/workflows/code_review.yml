@@ -15,14 +15,43 @@ jobs:
       image: ghcr.io/astral-sh/uv:python3.12-bookworm
 
     steps:
-      - name: Install git
-        run: apt-get update && apt-get install -y git
+      - name: Install git and Node.js
+        run: |
+          apt-get update && apt-get install -y git curl
+          curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+          apt-get install -y nodejs
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - name: Run type check and tests
+        id: checks
+        run: |
+          git config --global --add safe.directory $GITHUB_WORKSPACE
+          npm ci --prefer-offline 2>&1 | tail -5
+          echo "## Type & Test Results" > test_results.txt
+          echo "Commit: ${{ github.sha }}" >> test_results.txt
+          echo "Branch: ${{ github.head_ref }}" >> test_results.txt
+          echo "" >> test_results.txt
+          if npm run lint 2>&1 | tee -a test_results.txt; then
+            echo "TYPE_CHECK_STATUS=passed" >> $GITHUB_ENV
+            echo "✅ TypeScript type check: PASSED" >> test_results.txt
+          else
+            echo "TYPE_CHECK_STATUS=failed" >> $GITHUB_ENV
+            echo "❌ TypeScript type check: FAILED" >> test_results.txt
+          fi
+          # Placeholder for future test runner (vitest, jest, etc.)
+          # Uncomment when tests are added:
+          # if npm test -- --reporter=verbose 2>&1 | tee -a test_results.txt; then
+          #   echo "TEST_STATUS=passed" >> $GITHUB_ENV
+          # else
+          #   echo "TEST_STATUS=failed" >> $GITHUB_ENV
+          # fi
+        continue-on-error: true
       - name: Run security review
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          TEST_RESULTS_FILE: test_results.txt
+          TYPE_CHECK_STATUS: ${{ env.TYPE_CHECK_STATUS }}
         run: |
           git config --global --add safe.directory $GITHUB_WORKSPACE
           uv run --project code_review_agent code_review_agent/review_agent.py .

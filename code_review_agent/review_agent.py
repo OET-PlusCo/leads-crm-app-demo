@@ -130,6 +130,20 @@ def get_changed_files(repo_path: str) -> list[str]:
     return []
 
 
+def load_test_results() -> str | None:
+    """Read test/type-check results produced by CI, if available."""
+    results_file = os.environ.get("TEST_RESULTS_FILE", "test_results.txt")
+    if os.path.exists(results_file):
+        try:
+            content = open(results_file).read().strip()
+            if content:
+                print(f"📋 Test results loaded from {results_file} ({len(content)} chars)", flush=True)
+                return content
+        except Exception:
+            pass
+    return None
+
+
 def select_skills(changed_files: list[str]) -> list[str]:
     """Return only the skill names relevant to the changed files."""
     selected = list(CORE_SKILLS)  # always include core
@@ -206,12 +220,39 @@ async def enforce_safe_tools(data: types.ToolCall) -> types.HookResult:
 # Agent
 # ---------------------------------------------------------------------------
 
-async def review_code(target_dir: str, skills_paths: list[str]) -> dict:
-    prompt = (
-        f"Run `git diff main...HEAD -- ':!.github' ':!code_review_agent'` "
-        f"in {target_dir} to get the changes on this branch. "
-        "Review ONLY the changed code for security vulnerabilities and code quality issues."
-    )
+async def review_code(target_dir: str, skills_paths: list[str], test_results: str | None = None) -> dict:
+    test_context = ""
+    if test_results:
+        test_context = f"""
+The following type-check / test results were captured before this review.
+Treat any failures as high-priority regression findings:
+
+```
+{test_results}
+```
+"""
+
+    prompt = f"""Run `git diff main...HEAD -- ':!.github' ':!code_review_agent'` \
+in {target_dir} to get the changes on this branch.
+
+{test_context}
+Your review must cover TWO areas:
+
+1. SECURITY & QUALITY — review the changed code for vulnerabilities, code \
+quality issues, and best-practice violations using the loaded skills.
+
+2. REGRESSION RISK — for every function, method, or exported symbol that was \
+modified or removed, use `git grep` to find all callers in the codebase \
+(outside the changed files) and verify the change is compatible. Look for:
+   - Functions called by old name after being renamed
+   - Changed signatures where callers still pass old argument shapes
+   - Removed exports still imported elsewhere
+   - Altered return types used by callers without update
+   - Any CI type-check or test failures listed above
+
+Report regressions as CRITICAL or HIGH severity findings with the caller \
+file and line number.
+"""
 
     config_kwargs = dict(
         system_instructions=(
@@ -328,8 +369,14 @@ if __name__ == "__main__":
     skills_paths = build_skills_paths(selected_skill_names)
     print(f"🧠 Skills loaded ({len(skills_paths)}/{len(os.listdir(os.path.join(SCRIPT_DIR, 'skills')))} available): {', '.join(selected_skill_names)}", flush=True)
 
-    # 3. Run the review with the filtered skill set
-    result = asyncio.run(review_code(target, skills_paths))
+    # 3. Load test/type-check results from CI (if available)
+    test_results = load_test_results()
+    if test_results:
+        type_status = os.environ.get("TYPE_CHECK_STATUS", "unknown")
+        print(f"⚠️  Type check status: {type_status}", flush=True)
+
+    # 4. Run the review with the filtered skill set and test context
+    result = asyncio.run(review_code(target, skills_paths, test_results))
     markdown = format_markdown(result)
 
     with open(OUTPUT_FILE, "w") as f:
