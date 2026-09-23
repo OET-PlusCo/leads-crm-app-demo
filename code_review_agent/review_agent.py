@@ -114,7 +114,7 @@ def review_with_gemini(diff: str, changed_files: list[str]) -> str:
     """).strip()
 
     response = client.models.generate_content(
-        model="gemini-2.0-flash",
+        model="gemini-3.8-flash",
         contents=prompt,
     )
     return response.text
