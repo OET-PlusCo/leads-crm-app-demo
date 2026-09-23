@@ -1,161 +1,216 @@
 #!/usr/bin/env python3
 """
-AI Code Security and Quality Review Agent.
-Uses Gemini to review PR diffs and writes findings to code_review.md.
+AI Code Security and Quality Review Agent — powered by Antigravity SDK.
+
+Uses deny-by-default policies, agent skills (code-review-and-quality),
+structured Pydantic output, and audit hooks. Writes findings to code_review.md.
+
+Designed for GitHub Actions but also runnable locally:
+    uv run --project code_review_agent code_review_agent/review_agent.py .
 """
 
+import asyncio
+import json
 import os
-import subprocess
 import sys
-import textwrap
+
+import pydantic
+
+from google.antigravity import Agent, LocalAgentConfig
+from google.antigravity.hooks import hooks, policy
+from google.antigravity import types
 
 
-def get_git_diff(repo_path: str) -> str:
-    """Get the diff of the current PR against the base branch."""
-    try:
-        # Try to get diff against origin/main
-        result = subprocess.run(
-            ["git", "diff", "origin/main...HEAD", "--", ".", ":(exclude)*.lock", ":(exclude)package-lock.json"],
-            capture_output=True,
-            text=True,
-            cwd=repo_path,
-        )
-        diff = result.stdout.strip()
-        if diff:
-            return diff
+# ---------------------------------------------------------------------------
+# Output schema
+# ---------------------------------------------------------------------------
 
-        # Fallback: diff of the last commit
-        result = subprocess.run(
-            ["git", "diff", "HEAD~1", "HEAD", "--", ".", ":(exclude)*.lock", ":(exclude)package-lock.json"],
-            capture_output=True,
-            text=True,
-            cwd=repo_path,
-        )
-        return result.stdout.strip()
-    except Exception as e:
-        return f"Error getting git diff: {e}"
+class Finding(pydantic.BaseModel):
+    file: str
+    line: int
+    severity: str   # critical | high | medium | low
+    category: str
+    description: str
+    proposed_fix: str = ""
 
 
-def get_changed_files(repo_path: str) -> list[str]:
-    """Get list of changed files in the PR."""
-    try:
-        result = subprocess.run(
-            ["git", "diff", "--name-only", "origin/main...HEAD"],
-            capture_output=True,
-            text=True,
-            cwd=repo_path,
-        )
-        files = result.stdout.strip().splitlines()
-        if files:
-            return files
-
-        result = subprocess.run(
-            ["git", "diff", "--name-only", "HEAD~1", "HEAD"],
-            capture_output=True,
-            text=True,
-            cwd=repo_path,
-        )
-        return result.stdout.strip().splitlines()
-    except Exception:
-        return []
+class ReviewResult(pydantic.BaseModel):
+    findings: list[Finding]
 
 
-def review_with_gemini(diff: str, changed_files: list[str]) -> str:
-    """Send the diff to Gemini for code review."""
-    from google import genai
+# ---------------------------------------------------------------------------
+# Configuration
+# ---------------------------------------------------------------------------
 
-    api_key = os.environ.get("GEMINI_API_KEY")
-    if not api_key:
-        return "⚠️ **GEMINI_API_KEY not set** – skipping AI review."
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+OUTPUT_FILE = "code_review.md"
 
-    client = genai.Client(api_key=api_key)
+SKILLS_PATHS = [
+    os.path.join(SCRIPT_DIR, "skills", "code-review-and-quality"),
+]
 
-    if not diff:
-        return "ℹ️ No code changes detected in this PR."
+# Deny-by-default: only allow read + git commands
+review_policies = [
+    policy.deny_all(),
+    policy.allow("view_file"),
+    policy.allow("list_directory"),
+    policy.allow("search_directory"),
+    policy.allow("find_file"),
+    policy.allow("run_command"),
+    policy.allow("finish"),
+]
 
-    # Truncate diff if too large (Gemini has token limits)
-    max_diff_chars = 30_000
-    truncated = False
-    if len(diff) > max_diff_chars:
-        diff = diff[:max_diff_chars]
-        truncated = True
 
-    files_list = "\n".join(f"- {f}" for f in changed_files) if changed_files else "- (unknown)"
+# ---------------------------------------------------------------------------
+# Hooks — audit logging + second-layer git-only enforcement
+# ---------------------------------------------------------------------------
 
-    prompt = textwrap.dedent(f"""
-        You are an expert code reviewer specializing in security and code quality.
-        Review the following git diff from a pull request and provide a concise, actionable report.
-
-        **Changed files:**
-        {files_list}
-
-        **Git Diff:**
-        ```diff
-        {diff}
-        ```
-        {"*(Note: diff was truncated due to size)*" if truncated else ""}
-
-        Provide your review in **Markdown** with the following sections:
-
-        ## 🔒 Security Findings
-        List any security issues (injection risks, secrets exposure, insecure dependencies, auth issues, etc.).
-        Use severity labels: 🔴 Critical, 🟠 High, 🟡 Medium, 🟢 Low.
-        If none found, write "No security issues detected."
-
-        ## 🧹 Code Quality
-        List code quality issues (error handling, code duplication, naming, complexity, missing tests, etc.).
-        If none found, write "Code quality looks good."
-
-        ## ✅ Summary
-        A 2-3 sentence overall assessment of the changes.
-
-        Be specific and reference file names and line numbers when possible.
-        Keep the tone constructive and professional.
-    """).strip()
-
-    response = client.models.generate_content(
-        model="gemini-3.8-flash",
-        contents=prompt,
+@hooks.post_tool_call
+async def log_tool_results(data: types.ToolResult):
+    result_str = str(data.result) if data.result else ""
+    preview = result_str[:200] + "..." if len(result_str) > 200 else result_str
+    print(
+        f"[audit] tool={data.name} result_len={len(result_str)} "
+        f"error={data.error} preview={preview}",
+        flush=True,
     )
-    return response.text
 
 
-def write_report(findings: str, repo_path: str) -> None:
-    """Write the review findings to code_review.md in the repo root."""
-    pr_number = os.environ.get("GITHUB_REF", "").replace("refs/pull/", "").replace("/merge", "")
-    sha = os.environ.get("GITHUB_SHA", "")[:7] if os.environ.get("GITHUB_SHA") else ""
-
-    header = "## 🤖 AI Code Security & Quality Review\n\n"
-    if pr_number or sha:
-        meta = []
-        if pr_number:
-            meta.append(f"**PR:** #{pr_number}")
-        if sha:
-            meta.append(f"**Commit:** `{sha}`")
-        header += " · ".join(meta) + "\n\n"
-
-    output_path = os.path.join(repo_path, "code_review.md")
-    with open(output_path, "w") as f:
-        f.write(header + findings + "\n")
-
-    print(f"✅ Review written to {output_path}")
+@hooks.pre_tool_call_decide
+async def enforce_safe_tools(data: types.ToolCall) -> types.HookResult:
+    print(f"[audit] calling tool={data.name} args_keys={list(data.args.keys())}", flush=True)
+    if data.name == "run_command":
+        cmd = str(data.args.get("CommandLine", ""))
+        if not cmd.startswith("git "):
+            return types.HookResult(
+                allow=False,
+                message=f"Only git commands are allowed. Blocked: {cmd}",
+            )
+    return types.HookResult(allow=True)
 
 
-def main() -> None:
-    repo_path = sys.argv[1] if len(sys.argv) > 1 else "."
-    repo_path = os.path.abspath(repo_path)
+# ---------------------------------------------------------------------------
+# Agent
+# ---------------------------------------------------------------------------
 
-    print(f"🔍 Reviewing changes in: {repo_path}")
+async def review_code(target_dir: str) -> dict:
+    prompt = (
+        f"Run `git diff main...HEAD -- ':!.github' ':!code_review_agent'` "
+        f"in {target_dir} to get the changes on this branch. "
+        "Review ONLY the changed code for security vulnerabilities and code quality issues."
+    )
 
-    diff = get_git_diff(repo_path)
-    changed_files = get_changed_files(repo_path)
+    config_kwargs = dict(
+        system_instructions=(
+            "You are a code review agent. "
+            "You review code diffs for vulnerabilities and quality issues using the loaded skills. "
+            "You can run git commands to inspect the diff. "
+            "You NEVER modify files."
+        ),
+        response_schema=ReviewResult,
+        skills_paths=SKILLS_PATHS,
+        policies=review_policies,
+        hooks=[log_tool_results, enforce_safe_tools],
+    )
 
-    print(f"📄 Changed files: {', '.join(changed_files) if changed_files else 'none detected'}")
-    print(f"📏 Diff size: {len(diff)} chars")
+    if os.environ.get("GEMINI_API_KEY"):
+        config_kwargs["api_key"] = os.environ["GEMINI_API_KEY"]
+    else:
+        # Fallback to Vertex AI / Application Default Credentials
+        config_kwargs["vertex"] = True
+        config_kwargs["project"] = os.environ.get("GOOGLE_CLOUD_PROJECT")
+        config_kwargs["location"] = os.environ.get("GOOGLE_CLOUD_LOCATION", "global")
 
-    findings = review_with_gemini(diff, changed_files)
-    write_report(findings, repo_path)
+    config = LocalAgentConfig(**config_kwargs)
 
+    async with Agent(config) as agent:
+        response = await agent.chat(prompt)
+
+        # Collect final text (reset on each new tool call)
+        last_step = -1
+        final_text_chunks: list[str] = []
+        async for chunk in response.chunks:
+            if isinstance(chunk, types.ToolCall):
+                final_text_chunks.clear()
+            if hasattr(chunk, "text") and hasattr(chunk, "step_index"):
+                if chunk.step_index != last_step:
+                    final_text_chunks.clear()
+                    last_step = chunk.step_index
+                final_text_chunks.append(chunk.text)
+
+        final_text = "".join(final_text_chunks)
+        if final_text:
+            print(final_text)
+
+        # Primary: structured output via SDK finish tool
+        data = await response.structured_output()
+        if data and "findings" in data:
+            return {"findings": data["findings"]}
+
+        # Fallback: parse final text as JSON
+        try:
+            parsed = json.loads(final_text)
+            if isinstance(parsed, list):
+                return {"findings": parsed}
+            if isinstance(parsed, dict) and "findings" in parsed:
+                return {"findings": parsed["findings"]}
+        except json.JSONDecodeError:
+            pass
+
+    return {"findings": final_text}
+
+
+# ---------------------------------------------------------------------------
+# Formatting
+# ---------------------------------------------------------------------------
+
+SEVERITY_EMOJI = {
+    "critical": "🔴",
+    "high": "🟠",
+    "medium": "🟡",
+    "low": "🔵",
+}
+
+
+def format_markdown(result: dict) -> str:
+    findings = result.get("findings", [])
+
+    if isinstance(findings, str):
+        return f"## 🤖 AI Code Security & Quality Review\n\n{findings}\n"
+
+    if not findings:
+        return "## 🤖 AI Code Security & Quality Review\n\n✅ No security issues found.\n"
+
+    lines = ["## 🤖 AI Code Security & Quality Review\n"]
+    for f in findings:
+        emoji = SEVERITY_EMOJI.get(f.get("severity", "").lower(), "⚪")
+        severity = f.get("severity", "unknown").upper()
+        category = f.get("category", "")
+        lines.append(f"### {emoji} [{severity}] {category}\n")
+        lines.append(f"**`{f.get('file', '')}` line {f.get('line', '')}**\n")
+        lines.append(f"{f.get('description', '')}\n")
+        if fix := f.get("proposed_fix", ""):
+            lines.append(f"**Proposed fix:** {fix}\n")
+
+    lines.append("\n---\n*Powered by [Antigravity SDK](https://antigravity.dev)*")
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    main()
+    target = sys.argv[1] if len(sys.argv) > 1 else "."
+    target = os.path.abspath(target)
+
+    print(f"🔍 Reviewing changes in: {target}", flush=True)
+
+    result = asyncio.run(review_code(target))
+    markdown = format_markdown(result)
+
+    with open(OUTPUT_FILE, "w") as f:
+        f.write(markdown)
+
+    print(f"✅ Review written to {OUTPUT_FILE}")
+    print(json.dumps(result, indent=2))
