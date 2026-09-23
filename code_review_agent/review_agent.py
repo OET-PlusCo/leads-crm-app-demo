@@ -295,7 +295,7 @@ file and line number.
         hooks=[log_tool_results, enforce_safe_tools],
     )
 
-    model = os.environ.get("CODE_REVIEW_MODEL", "gemini-3.8-flash")
+    model = os.environ.get("CODE_REVIEW_MODEL", "").strip() or "gemini-3.8-flash"
     print(f"🤖 Model: {model}", flush=True)
     config_kwargs["model"] = model
 
