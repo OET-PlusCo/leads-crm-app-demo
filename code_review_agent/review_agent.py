@@ -5,6 +5,9 @@ AI Code Security and Quality Review Agent — powered by Antigravity SDK.
 Uses deny-by-default policies, agent skills (code-review-and-quality),
 structured Pydantic output, and audit hooks. Writes findings to code_review.md.
 
+Skills are selected dynamically based on the files changed in the PR so the
+agent only loads what is relevant — keeping token usage low and reviews focused.
+
 Designed for GitHub Actions but also runnable locally:
     uv run --project code_review_agent code_review_agent/review_agent.py .
 """
@@ -12,6 +15,7 @@ Designed for GitHub Actions but also runnable locally:
 import asyncio
 import json
 import os
+import subprocess
 import sys
 
 import pydantic
@@ -45,24 +49,118 @@ class ReviewResult(pydantic.BaseModel):
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 OUTPUT_FILE = "code_review.md"
 
-SKILLS_PATHS = [
-    # Core review axes
-    os.path.join(SCRIPT_DIR, "skills", "code-review-and-quality"),
-    os.path.join(SCRIPT_DIR, "skills", "security-and-hardening"),
-    os.path.join(SCRIPT_DIR, "skills", "performance-optimization"),
-    # Good practices
-    os.path.join(SCRIPT_DIR, "skills", "api-and-interface-design"),
-    os.path.join(SCRIPT_DIR, "skills", "documentation-and-adrs"),
-    os.path.join(SCRIPT_DIR, "skills", "webapp-testing"),
-    # Frontend & UI
-    os.path.join(SCRIPT_DIR, "skills", "frontend-ui-engineering"),
-    os.path.join(SCRIPT_DIR, "skills", "accessibility"),
-    # Testing
-    os.path.join(SCRIPT_DIR, "skills", "writing-unit-tests"),
-    # Infrastructure
-    os.path.join(SCRIPT_DIR, "skills", "terraform-style-guide"),
-    os.path.join(SCRIPT_DIR, "skills", "terraform-test"),
+# Always loaded — apply to every PR regardless of file types
+CORE_SKILLS = [
+    "code-review-and-quality",
+    "security-and-hardening",
+    "performance-optimization",
 ]
+
+# Loaded only when matching files are detected in the diff
+CONDITIONAL_SKILLS: list[tuple[list[str], callable]] = [
+    # Frontend / UI — .tsx, .jsx, .css, .scss, .html, .vue
+    (
+        ["frontend-ui-engineering", "accessibility"],
+        lambda files: any(
+            f.endswith((".tsx", ".jsx", ".css", ".scss", ".html", ".vue"))
+            for f in files
+        ),
+    ),
+    # Backend / API — .ts, .js, .py, .go, .java
+    (
+        ["api-and-interface-design", "webapp-testing", "writing-unit-tests", "documentation-and-adrs"],
+        lambda files: any(
+            f.endswith((".ts", ".js", ".py", ".go", ".java")) and
+            not f.endswith((".tsx", ".jsx"))  # exclude frontend already covered above
+            for f in files
+        ),
+    ),
+    # Firebase / Firestore — .rules files or paths containing firebase/firestore
+    (
+        ["firebase-security-rules-auditor", "firestore-security-rules-auditor", "firebase-firestore"],
+        lambda files: any(
+            f.endswith(".rules") or "firebase" in f.lower() or "firestore" in f.lower()
+            for f in files
+        ),
+    ),
+    # Terraform — .tf, .tfvars, .tftest.hcl
+    (
+        ["terraform-style-guide", "terraform-test"],
+        lambda files: any(
+            f.endswith((".tf", ".tfvars", ".tftest.hcl"))
+            for f in files
+        ),
+    ),
+    # AI / Agent code — paths containing agent, adk, gemini, or llm
+    (
+        ["gemini-api-dev", "google-agents-cli-adk-code"],
+        lambda files: any(
+            any(kw in f.lower() for kw in ("agent", "adk", "gemini", "llm", "review_agent"))
+            for f in files
+        ),
+    ),
+    # GCP infrastructure — Cloud Run, Cloud Build, GCP WAF
+    (
+        ["cloud-run-basics", "google-cloud-waf-security"],
+        lambda files: any(
+            any(kw in f.lower() for kw in ("cloudbuild", "cloud_run", "cloudrun", "dockerfile", "deploy"))
+            or f.endswith((".yaml", ".yml")) and any(
+                kw in open(os.path.join(os.getcwd(), f), errors="ignore").read().lower()
+                for kw in ("cloud-run", "cloudrun", "gcloud", "google-cloud")
+            ) if os.path.exists(os.path.join(os.getcwd(), f)) else False
+            for f in files
+        ),
+    ),
+]
+
+
+def get_changed_files(repo_path: str) -> list[str]:
+    """Get list of files changed in this PR."""
+    for ref in ["origin/main...HEAD", "HEAD~1..HEAD"]:
+        try:
+            result = subprocess.run(
+                ["git", "diff", "--name-only", ref],
+                capture_output=True, text=True, cwd=repo_path,
+            )
+            files = [f for f in result.stdout.strip().splitlines() if f]
+            if files:
+                return files
+        except Exception:
+            pass
+    return []
+
+
+def select_skills(changed_files: list[str]) -> list[str]:
+    """Return only the skill names relevant to the changed files."""
+    selected = list(CORE_SKILLS)  # always include core
+
+    for skill_names, condition in CONDITIONAL_SKILLS:
+        try:
+            if condition(changed_files):
+                selected.extend(skill_names)
+        except Exception:
+            pass  # never crash skill selection
+
+    # Deduplicate while preserving order
+    seen: set[str] = set()
+    result = []
+    for s in selected:
+        if s not in seen:
+            seen.add(s)
+            result.append(s)
+    return result
+
+
+def build_skills_paths(skill_names: list[str]) -> list[str]:
+    """Convert skill names to absolute paths, skipping any that don't exist on disk."""
+    paths = []
+    for name in skill_names:
+        path = os.path.join(SCRIPT_DIR, "skills", name)
+        if os.path.isdir(path):
+            paths.append(path)
+        else:
+            print(f"[skills] skipping '{name}' — not installed at {path}", flush=True)
+    return paths
 
 # Deny-by-default: only allow read + git commands
 review_policies = [
@@ -108,7 +206,7 @@ async def enforce_safe_tools(data: types.ToolCall) -> types.HookResult:
 # Agent
 # ---------------------------------------------------------------------------
 
-async def review_code(target_dir: str) -> dict:
+async def review_code(target_dir: str, skills_paths: list[str]) -> dict:
     prompt = (
         f"Run `git diff main...HEAD -- ':!.github' ':!code_review_agent'` "
         f"in {target_dir} to get the changes on this branch. "
@@ -123,7 +221,7 @@ async def review_code(target_dir: str) -> dict:
             "You NEVER modify files."
         ),
         response_schema=ReviewResult,
-        skills_paths=SKILLS_PATHS,
+        skills_paths=skills_paths,
         policies=review_policies,
         hooks=[log_tool_results, enforce_safe_tools],
     )
@@ -221,7 +319,17 @@ if __name__ == "__main__":
 
     print(f"🔍 Reviewing changes in: {target}", flush=True)
 
-    result = asyncio.run(review_code(target))
+    # 1. Detect changed files
+    changed_files = get_changed_files(target)
+    print(f"📄 Changed files ({len(changed_files)}): {', '.join(changed_files) or 'none detected'}", flush=True)
+
+    # 2. Select only the skills relevant to what changed
+    selected_skill_names = select_skills(changed_files)
+    skills_paths = build_skills_paths(selected_skill_names)
+    print(f"🧠 Skills loaded ({len(skills_paths)}/{len(os.listdir(os.path.join(SCRIPT_DIR, 'skills')))} available): {', '.join(selected_skill_names)}", flush=True)
+
+    # 3. Run the review with the filtered skill set
+    result = asyncio.run(review_code(target, skills_paths))
     markdown = format_markdown(result)
 
     with open(OUTPUT_FILE, "w") as f:
