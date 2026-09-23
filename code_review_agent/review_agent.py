@@ -47,6 +47,8 @@ OUTPUT_FILE = "code_review.md"
 
 SKILLS_PATHS = [
     os.path.join(SCRIPT_DIR, "skills", "code-review-and-quality"),
+    os.path.join(SCRIPT_DIR, "skills", "security-and-hardening"),
+    os.path.join(SCRIPT_DIR, "skills", "performance-optimization"),
 ]
 
 # Deny-by-default: only allow read + git commands
