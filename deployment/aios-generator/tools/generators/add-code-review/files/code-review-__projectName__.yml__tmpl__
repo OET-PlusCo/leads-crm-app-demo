@@ -1,0 +1,29 @@
+name: AI Code Review — <%= projectName %>
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+    paths:
+      - '<%= projectRoot %>/**'
+      - 'packages/**'
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    container:
+      image: ghcr.io/astral-sh/uv:python3.12-bookworm
+    steps:
+      - name: Install git
+        run: apt-get update && apt-get install -y git curl
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: OET-PlusCo/devtools/.github/actions/code-review@main
+        with:
+          gemini_api_key: ${{ secrets.GEMINI_API_KEY }}
+          node_version: '<%= nodeVersion %>'
+<% if (testCommand) { %>          test_command: '<%= testCommand %>'
+<% } %>

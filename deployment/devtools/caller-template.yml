@@ -1,0 +1,29 @@
+# Copy this file to .github/workflows/code_review.yml in any repo.
+# That's all — the agent, skills, and logic live in OET-PlusCo/devtools.
+name: AI Code Review
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    container:
+      image: ghcr.io/astral-sh/uv:python3.12-bookworm
+    steps:
+      - name: Install git
+        run: apt-get update && apt-get install -y git curl
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: OET-PlusCo/devtools/.github/actions/code-review@main
+        with:
+          gemini_api_key: ${{ secrets.GEMINI_API_KEY }}
+          # Optional overrides:
+          # run_typecheck: 'true'
+          # test_command: 'npm test'
+          # node_version: '20'

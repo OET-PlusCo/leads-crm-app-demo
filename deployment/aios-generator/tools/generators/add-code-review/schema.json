@@ -1,0 +1,26 @@
+{
+  "$schema": "http://json-schema.org/schema",
+  "$id": "AddCodeReview",
+  "title": "Add AI Code Review workflow to a project",
+  "type": "object",
+  "properties": {
+    "project": {
+      "type": "string",
+      "description": "The NX project to add the code review workflow to",
+      "$default": { "$source": "firstPositional" },
+      "x-prompt": "Which project do you want to add code review to?",
+      "x-dropdown": "projects"
+    },
+    "testCommand": {
+      "type": "string",
+      "description": "Custom test command (e.g. 'nx test my-app'). Leave empty to skip.",
+      "default": ""
+    },
+    "nodeVersion": {
+      "type": "string",
+      "description": "Node.js version for type checking",
+      "default": "20"
+    }
+  },
+  "required": ["project"]
+}
