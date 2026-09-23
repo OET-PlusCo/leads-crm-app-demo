@@ -54,6 +54,9 @@ SKILLS_PATHS = [
     os.path.join(SCRIPT_DIR, "skills", "api-and-interface-design"),
     os.path.join(SCRIPT_DIR, "skills", "documentation-and-adrs"),
     os.path.join(SCRIPT_DIR, "skills", "webapp-testing"),
+    # Frontend & UI
+    os.path.join(SCRIPT_DIR, "skills", "frontend-ui-engineering"),
+    os.path.join(SCRIPT_DIR, "skills", "accessibility"),
 ]
 
 # Deny-by-default: only allow read + git commands
