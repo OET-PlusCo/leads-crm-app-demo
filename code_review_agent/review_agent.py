@@ -93,6 +93,16 @@ CONDITIONAL_SKILLS: list[tuple[list[str], callable]] = [
             for f in files
         ),
     ),
+    # Module Federation — vite.config.ts with federation, remoteEntry, exposes/remotes
+    (
+        ["module-federation"],
+        lambda files: any(
+            os.path.basename(f) in ("vite.config.ts", "vite.config.js", "webpack.config.js", "webpack.config.ts")
+            or "remoteEntry" in f
+            or "bootstrap" in f.lower()
+            for f in files
+        ),
+    ),
     # Firebase / Firestore — .rules files or paths containing firebase/firestore
     (
         ["firebase-security-rules-auditor", "firebase-firestore", "firebase-auth-basics"],
