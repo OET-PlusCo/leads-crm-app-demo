@@ -16,7 +16,4 @@ on:
 jobs:
   review:
     uses: OET-PlusCo/devtools/.github/workflows/code-review.yml@main
-    secrets:
-      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-      GOOGLE_CLOUD_PROJECT: ${{ secrets.GOOGLE_CLOUD_PROJECT }}
-      GOOGLE_CLOUD_LOCATION: ${{ secrets.GOOGLE_CLOUD_LOCATION }}
+    secrets: inherit   # pulls GEMINI_API_KEY etc. from org secrets automatically
